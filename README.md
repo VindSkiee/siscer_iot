@@ -161,5 +161,5 @@ Jika Anda ingin, saya dapat:
 Beritahu opsi mana yang Anda mau saya kerjakan berikutnya.
 
 ## Run Mosquitto
-
+run cmd administrator:
 "C:\Program Files\mosquitto\mosquitto.exe" -c "C:\Program Files\mosquitto\mosquitto.conf" -v
