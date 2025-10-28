@@ -1,4 +1,5 @@
-require("dotenv").config();
+import dotenv from "dotenv";
+dotenv.config();
 import { connect } from "mqtt";
 import { InfluxDB, Point } from "@influxdata/influxdb-client";
 
