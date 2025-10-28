@@ -159,3 +159,7 @@ Jika Anda ingin, saya dapat:
 - scaffold frontend sederhana (React/Vite) dan menambahkan `npm start` script.
 
 Beritahu opsi mana yang Anda mau saya kerjakan berikutnya.
+
+## Run Mosquitto
+
+"C:\Program Files\mosquitto\mosquitto.exe" -c "C:\Program Files\mosquitto\mosquitto.conf" -v
