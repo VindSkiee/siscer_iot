@@ -31,6 +31,24 @@ const influxDB = new InfluxDB({ url: INFLUX_URL, token: INFLUX_TOKEN });
 const writeApi = influxDB.getWriteApi(INFLUX_ORG, INFLUX_BUCKET, "ns"); // nanoseconds precision
 writeApi.useDefaultTags({ app: "iot-mqtt-influx-backend" });
 
+// Small connectivity check: write a lightweight point and flush to verify InfluxDB is reachable.
+async function testInfluxConnection() {
+  try {
+    const p = new Point("connectivity_check")
+      .tag("app", "iot-mqtt-influx-backend")
+      .intField("status", 1)
+      .timestamp(Date.now() * 1e6);
+    writeApi.writePoint(p);
+    await writeApi.flush();
+    console.log("Connected to InfluxDB:", INFLUX_URL, "(write OK)");
+  } catch (err) {
+    console.error("InfluxDB connectivity test failed:", err?.message ?? err);
+  }
+}
+
+// Run connectivity test (non-blocking startup)
+await testInfluxConnection();
+
 /* ---------- MQTT connect options ---------- */
 const mqttOptions = {};
 if (MQTT_USERNAME) mqttOptions.username = MQTT_USERNAME;
