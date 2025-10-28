@@ -1,0 +1,19 @@
+{
+  "name": "backend-mqtt-influxdb-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:dev": "nodemon index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "MQTT subscriber that stores DHT11, LDR, Soil Moisture data into InfluxDB",
+  "dependencies": {
+    "@influxdata/influxdb-client": "^1.35.0",
+    "dotenv": "^17.2.3",
+    "mqtt": "^5.14.1",
+    "nodemon": "^3.1.10"
+  }
+}
