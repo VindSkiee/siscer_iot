@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import { connect } from "mqtt";
 import { InfluxDB, Point } from "@influxdata/influxdb-client";
+import { getWaterClass, getWaterAmount } from "./ml_service_client.js"; // sesuaikan path
 
 const {
   MQTT_URL,
@@ -39,13 +40,12 @@ try {
     .timestamp(Date.now() * 1e6);
 
   writeApi.writePoint(point);
-  await writeApi.flush(); // flush untuk memastikan koneksi ke server
+  await writeApi.flush();
   console.log("✅ Connected to InfluxDB successfully!");
 } catch (err) {
   console.error("❌ Failed to connect to InfluxDB:", err.message || err);
   process.exit(1);
 }
-
 
 /* ---------- MQTT connect options ---------- */
 const mqttOptions = {};
@@ -58,11 +58,8 @@ const client = connect(MQTT_URL, mqttOptions);
 client.on("connect", () => {
   console.log("✅ Connected to MQTT broker:", MQTT_URL);
   client.subscribe(MQTT_TOPIC, { qos: 1 }, (err, granted) => {
-    if (err) {
-      console.error("Subscribe error", err);
-    } else {
-      console.log("Subscribed to", MQTT_TOPIC, "granted:", granted);
-    }
+    if (err) console.error("Subscribe error", err);
+    else console.log("Subscribed to", MQTT_TOPIC, "granted:", granted);
   });
 });
 
@@ -80,59 +77,91 @@ function safeParseJson(payload) {
   }
 }
 
-/* ---------- Process MQTT messages ---------- */
-function processMessage(topic, payloadBuffer) {
-  const payloadStr = payloadBuffer.toString();
-  const data = safeParseJson(payloadStr);
-  if (!data) return;
-
-  const device = data.device || extractDeviceFromTopic(topic) || "unknown";
-  const tsMs = typeof data.timestamp === "number" ? data.timestamp : Date.now();
-
-  const writeNumberField = (sensorType, fieldKey, rawValue, measurement = "sensor_data") => {
-    const n = Number(rawValue);
-    if (Number.isNaN(n)) return;
-    const p = new Point(measurement)
-      .tag("device", device)
-      .tag("sensor_type", sensorType)
-      .floatField(fieldKey, n)
-      .timestamp(tsMs * 1e6);
-    writeApi.writePoint(p);
-  };
-
-  if (data.dht11 && typeof data.dht11 === "object") {
-    writeNumberField("dht11", "temperature", data.dht11.temperature);
-    writeNumberField("dht11", "humidity", data.dht11.humidity);
-  }
-
-  if (data.ldr && typeof data.ldr === "object") {
-    writeNumberField("ldr", "value", data.ldr.value);
-  }
-
-  if (data.soil && typeof data.soil === "object") {
-    writeNumberField("soil_moisture", "value", data.soil.value);
-  }
-}
-
 function extractDeviceFromTopic(topic) {
   const parts = topic.split("/");
   if (parts.length >= 2) return parts[1];
-  return null;
+  return "unknown";
 }
 
-client.on("message", (topic, message) => {
+/* ---------- Process MQTT messages ---------- */
+client.on("message", async (topic, message) => {
   try {
-    processMessage(topic, message);
+    const data = safeParseJson(message.toString());
+    if (!data) return;
+
+    const device = data.device || extractDeviceFromTopic(topic);
+    const tsMs = data.timestamp ?? Date.now();
+
+    // Simpan sensor raw ke Influx
+    const writeNumberField = (sensorType, fieldKey, rawValue, measurement = "sensor_data") => {
+      const n = Number(rawValue);
+      if (Number.isNaN(n)) return;
+      const p = new Point(measurement)
+        .tag("device", device)
+        .tag("sensor_type", sensorType)
+        .floatField(fieldKey, n)
+        .timestamp(tsMs * 1e6);
+      writeApi.writePoint(p);
+    };
+
+    if (data.dht11) {
+      writeNumberField("dht11", "temperature", data.dht11.temperature);
+      writeNumberField("dht11", "humidity", data.dht11.humidity);
+    }
+    if (data.soil) writeNumberField("soil_moisture", "value", data.soil.value);
+    if (data.ldr) writeNumberField("ldr", "value", data.ldr.value);
+
+    // ----- ML Prediction -----
+    const temp = data.dht11?.temperature;
+    const soil = data.soil?.value;
+    const hum = data.dht11?.humidity;
+    const ldr = data.ldr?.value;
+
+    if (temp != null && soil != null && hum != null && ldr != null) {
+      // Klasifikasi
+      const classResult = await getWaterClass(temp, soil);
+
+      // Regresi
+      const amountResult = await getWaterAmount(temp, soil, hum, ldr);
+
+      // Gabungkan raw data + prediksi
+      const logData = {
+        device,
+        timestamp: new Date(tsMs).toISOString(),
+        sensors: {
+          temperature: temp,
+          humidity: hum,
+          soil_moisture: soil,
+          light_level: ldr,
+        },
+        prediction: {
+          water_class: classResult,      // { prediction: 0/1, label: "Jangan Siram"/"Siram" }
+          water_amount: amountResult,    // { prediction: float, label: "X ml" }
+        },
+      };
+
+      console.log("📊 Sensor + Prediksi:", JSON.stringify(logData, null, 2));
+
+      // Simpan prediksi ke InfluxDB
+      const predPoint = new Point("prediction")
+        .tag("device", device)
+        .floatField("should_water", classResult.prediction)
+        .floatField("water_amount_ml", amountResult.prediction)
+        .timestamp(tsMs * 1e6);
+      writeApi.writePoint(predPoint);
+    }
+
   } catch (err) {
-    console.error("Error processing message:", err);
+    console.error("Error processing MQTT message:", err);
   }
 });
+
 
 /* ---------- Graceful shutdown ---------- */
 async function shutdown() {
   console.log("Shutting down: flushing Influx writes and closing MQTT...");
   try {
-    await writeApi.close(); 
+    await writeApi.close();
     console.log("Influx writeApi closed.");
   } catch (e) {
     console.error("Error closing Influx writeApi:", e);
@@ -152,8 +181,7 @@ async function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
+// flush berkala setiap 5 detik
 setInterval(() => {
-  writeApi.flush().catch((err) => {
-    console.error("Influx flush error", err);
-  });
+  writeApi.flush().catch((err) => console.error("Influx flush error", err));
 }, 5000);
