@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 // --- KONFIGURASI ---
-const String backendHost = "192.168.1.5:4000";
+const String backendHost = "192.168.1.6:4000";
 const String httpUrl = "http://$backendHost";
 const String wsUrl = "ws://$backendHost";
 
