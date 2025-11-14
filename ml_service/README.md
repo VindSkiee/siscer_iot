@@ -114,7 +114,6 @@ json
 ## 🔹 Catatan
 
  Gunakan virtual environment untuk mengisolasi paket.
- Model disimpan di folder `models/` dan bisa di-update kapan saja.
  Untuk prediksi baru, selalu lakukan scaling menggunakan scaler yang sama dengan saat training.
 
 
